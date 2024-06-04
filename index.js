@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handler = void 0;
-const aws_sdk_1 = require("aws-sdk");
+const AWS = require("aws-sdk");
 const axios = require("axios");
+
 /**
  * AWS region in which your User Pools are deployed
  */
@@ -20,6 +21,8 @@ const OLD_EXTERNAL_ID = process.env.OLD_EXTERNAL_ID;
 
 const NEW_USER_POOL_ID = process.env.NEW_USER_POOL_ID;
 const CLOUD_FRONT_URL = process.env.CLOUD_FRONT_URL;
+const cognito = new AWS.CognitoIdentityServiceProvider({ region: OLD_USER_POOL_REGION });
+
 async function authenticateUser(cognitoISP, username, password) {
     console.log(`authenticateUser: user='${username}'`);
     try {
@@ -101,20 +104,26 @@ async function onUserMigrationForgotPassword(cognitoISP, event) {
 }
 
 async function getUserFromCurrentUserPool({ username }) {
-    const client = new aws_sdk_1.CognitoIdentityProviderClient({ region: OLD_USER_POOL_REGION });
-    const command = new aws_sdk_1.AdminGetUserCommand({
+    const command = {
       UserPoolId: NEW_USER_POOL_ID,
-      Username: username,
-    });
+    };
     try {
-      const response = await client.send(command);
-      console.log(response.UserAttributes); // This will log all user attributes
-      // Extract clientId from the response
-      const clientId = response.UserAttributes.find(attr => attr.Name === 'custom:client_id')?.Value;
-      console.log(`Client ID: ${clientId}`);
-      return clientId;
+        const response = await cognito.listUserPoolClients(command).promise();
+        const client = response.UserPoolClients.find(client => {
+            console.log('client attribute', client);
+            client.ClientName === username
+        });
+        const clientId = client ? client.ClientId : null;
+        if (!clientId) {
+            throw new Error('Client not found');
+        }
+        return clientId;
     } catch (error) {
-      console.error(error);
+        console.error(error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: error.message })
+        };
     }
   };
 async function updateUsernameInDatabse(email) {
@@ -144,7 +153,7 @@ exports.handler = async (event, context) => {
         region: OLD_USER_POOL_REGION,
     };
     if (OLD_ROLE_ARN) {
-        options.credentials = new aws_sdk_1.ChainableTemporaryCredentials({
+        options.credentials = new AWS.ChainableTemporaryCredentials({
             params: {
                 ExternalId: OLD_EXTERNAL_ID,
                 RoleArn: OLD_ROLE_ARN,
@@ -152,7 +161,7 @@ exports.handler = async (event, context) => {
             },
         });
     }
-    const cognitoIdentityServiceProvider = new aws_sdk_1.CognitoIdentityServiceProvider(options);
+    const cognitoIdentityServiceProvider = new AWS.CognitoIdentityServiceProvider(options);
     switch (event.triggerSource) {
         case 'UserMigration_Authentication':
             return onUserMigrationAuthentication(cognitoIdentityServiceProvider, event);
