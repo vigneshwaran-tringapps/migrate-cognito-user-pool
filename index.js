@@ -19,10 +19,6 @@ const OLD_CLIENT_ID = process.env.OLD_CLIENT_ID || '<OLD_CLIENT_ID>';
 const OLD_ROLE_ARN = process.env.OLD_ROLE_ARN;
 const OLD_EXTERNAL_ID = process.env.OLD_EXTERNAL_ID;
 
-const NEW_USER_POOL_ID = process.env.NEW_USER_POOL_ID;
-const CLOUD_FRONT_URL = process.env.CLOUD_FRONT_URL;
-
-const cognito = new AWS.CognitoIdentityServiceProvider();
 async function authenticateUser(cognitoISP, username, password) {
     console.log(`authenticateUser: user='${username}'`);
     try {
@@ -82,7 +78,6 @@ async function onUserMigrationAuthentication(cognitoISP, event) {
     event.response.finalUserStatus = 'CONFIRMED';
     event.response.messageAction = 'SUPPRESS';
     console.log(`Authentication - response: ${JSON.stringify(event.response)}`);
-    await updateUsernameInDatabse(event.userName);
     return event;
 }
 async function onUserMigrationForgotPassword(cognitoISP, event) {
@@ -103,44 +98,6 @@ async function onUserMigrationForgotPassword(cognitoISP, event) {
     return event;
 }
 
-async function getUserFromCurrentUserPool({ username }) {
-    const params = {
-        UserPoolId: NEW_USER_POOL_ID,
-        Username: username, // Assuming the email address is unique and serves as the username
-    };
-    try {
-        const response = await cognito.adminGetUser(params).promise();
-        console.log('User retrieved:', response);
-        return response;
-    } catch (error) {
-        console.error('Error retrieving user:', error);
-    }
-  };
-async function updateUsernameInDatabse(email) {
-    const clientId = await getUserFromCurrentUserPool({ username: email});
-    if (!clientId) {
-        throw new Error('getUserFromCurrentUserPool function failed!')
-    }
-    await axios({
-        url: CLOUD_FRONT_URL,
-        method: "post",
-        data: {
-          query: `
-                mutation UpdateNewCognitoUserName($email: String!, $username: String!) {
-                    updateNewCognitoUserName(email: $email, username: $username)
-                }
-            `,
-          variables: {
-            email: email,
-            username: clientId,
-          },
-        },
-      }).then((response) => {
-        console.log(`Update New congito Username : ${response.data}`);
-      }).catch((err) => {
-        console.log(`Error while updating username in cognito : ${err}`)
-      });
-}
 exports.handler = async (event, context) => {
     const options = {
         region: OLD_USER_POOL_REGION,
